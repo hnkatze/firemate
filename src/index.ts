@@ -2,6 +2,15 @@
 export { createFireMate, FireMate } from './core/firemate.js';
 export { Collection } from './core/collection.js';
 
+// Batch & Transactions
+export { BatchWriter, FireMateTransaction } from './core/batch.js';
+
+// Pagination
+export { InfiniteLoader } from './core/pagination.js';
+
+// Subcollections
+export { SubCollection, NestedSubCollection } from './core/subcollection.js';
+
 // Field values
 export {
   serverTimestamp,

@@ -27,12 +27,17 @@ import type {
   CreateData,
   UpdateData,
   QueryOptions,
+  PaginateOptions,
+  Page,
   FireMateOptions,
   QueryBuilder,
 } from '../types/firemate.types.js';
 import { buildQuery } from '../utils/build-query.js';
 import { mapDocSnapshot, mapQuerySnapshots } from '../utils/map-snapshot.js';
 import { NotFoundError, PermissionError, FireMateError } from '../errors/firemate-error.js';
+import { paginateCollection, InfiniteLoader } from './pagination.js';
+import { chunkArray, FIRESTORE_BATCH_LIMIT } from './batch.js';
+import { SubCollection } from './subcollection.js';
 
 const MAX_BATCH_IN_QUERY = 30;
 
@@ -267,6 +272,131 @@ export class Collection<T extends Record<string, unknown>> {
     return new FluentQueryBuilder<T>(this.collectionRef, this.idField).where(field, op, value);
   }
 
+  // ─── BULK OPERATIONS ─────────────────────────────────
+
+  /**
+   * Add multiple documents. Auto-chunks if > 500.
+   */
+  async addMany(items: CreateData<T>[]): Promise<DocumentWithId<T>[]> {
+    if (items.length === 0) return [];
+
+    const results: DocumentWithId<T>[] = [];
+    const chunks = chunkArray(items, FIRESTORE_BATCH_LIMIT);
+    const { writeBatch } = await import('firebase/firestore');
+
+    for (const chunk of chunks) {
+      const batch = writeBatch(this.firestore);
+      const chunkResults: DocumentWithId<T>[] = [];
+
+      for (const item of chunk) {
+        const ref = doc(collection(this.firestore, this.path));
+        const writeData = this.applyTimestamps(item, 'create');
+        batch.set(ref, writeData);
+        chunkResults.push({
+          ...item,
+          [this.idField]: ref.id,
+          ...this.resolveTimestampFields('create'),
+        } as DocumentWithId<T>);
+      }
+
+      await batch.commit();
+      results.push(...chunkResults);
+    }
+
+    this.notifyWrite('batch', `${this.path} (addMany: ${items.length})`);
+    return results;
+  }
+
+  /**
+   * Update multiple documents by IDs with the same data. Auto-chunks if > 500.
+   */
+  async updateMany(ids: string[], data: UpdateData<T>): Promise<void> {
+    if (ids.length === 0) return;
+
+    const chunks = chunkArray(ids, FIRESTORE_BATCH_LIMIT);
+    const { writeBatch } = await import('firebase/firestore');
+
+    for (const chunk of chunks) {
+      const batch = writeBatch(this.firestore);
+      const writeData = this.applyTimestamps(data, 'update');
+
+      for (const id of chunk) {
+        const ref = this.docRef(id);
+        batch.update(ref, writeData);
+      }
+
+      await batch.commit();
+    }
+
+    this.notifyWrite('batch', `${this.path} (updateMany: ${ids.length})`);
+  }
+
+  /**
+   * Delete multiple documents by IDs. Auto-chunks if > 500.
+   */
+  async deleteMany(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+
+    const chunks = chunkArray(ids, FIRESTORE_BATCH_LIMIT);
+    const { writeBatch } = await import('firebase/firestore');
+
+    for (const chunk of chunks) {
+      const batch = writeBatch(this.firestore);
+
+      for (const id of chunk) {
+        const ref = this.docRef(id);
+        batch.delete(ref);
+      }
+
+      await batch.commit();
+    }
+
+    this.notifyWrite('batch', `${this.path} (deleteMany: ${ids.length})`);
+  }
+
+  /**
+   * Update all documents matching a query with the same data.
+   */
+  async updateWhere(queryOptions: QueryOptions<T>, data: UpdateData<T>): Promise<number> {
+    const docs = await this.find(queryOptions);
+    if (docs.length === 0) return 0;
+
+    const ids = docs.map((d) => (d as Record<string, unknown>)[this.idField] as string);
+    await this.updateMany(ids, data);
+    return docs.length;
+  }
+
+  // ─── PAGINATION ─────────────────────────────────────────
+
+  /**
+   * Paginate through documents with cursor-based pagination.
+   */
+  async paginate(options: PaginateOptions<T>): Promise<Page<DocumentWithId<T>>> {
+    return paginateCollection<T>(this.collectionRef, options, this.idField);
+  }
+
+  /**
+   * Create an infinite loader for "load more" / infinite scroll patterns.
+   */
+  infiniteLoader(options: PaginateOptions<T>): InfiniteLoader<T> {
+    return new InfiniteLoader<T>(this.collectionRef, options, this.idField);
+  }
+
+  // ─── SUBCOLLECTIONS ─────────────────────────────────────
+
+  /**
+   * Define a typed subcollection.
+   *
+   * @example
+   * ```ts
+   * const userOrders = users.subcollection<Order>('orders');
+   * const orders = await userOrders.of('userId123').find({ where: { status: 'pending' } });
+   * ```
+   */
+  subcollection<TSub extends Record<string, unknown>>(name: string): SubCollection<T, TSub> {
+    return new SubCollection<T, TSub>(this.firestore, this.path, name, this.options);
+  }
+
   // ─── AGGREGATIONS ──────────────────────────────────────
 
   /**
@@ -275,6 +405,15 @@ export class Collection<T extends Record<string, unknown>> {
   async count(options: QueryOptions<T> = {}): Promise<number> {
     const results = await this.find(options);
     return results.length;
+  }
+
+  // ─── PUBLIC ACCESSORS ──────────────────────────────────
+
+  /**
+   * Get the Firestore path for this collection.
+   */
+  getPath(): string {
+    return this.path;
   }
 
   // ─── INTERNALS ─────────────────────────────────────────
