@@ -1,0 +1,63 @@
+{
+  "name": "@hnkatze/firemate",
+  "version": "0.1.0-beta.0",
+  "description": "A typed, framework-agnostic Firebase Firestore wrapper. Less boilerplate, full type safety.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "firebase",
+    "firestore",
+    "wrapper",
+    "typed",
+    "typescript",
+    "framework-agnostic",
+    "angular",
+    "react",
+    "vue"
+  ],
+  "author": "hnkatze",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hnkatze/firemate"
+  },
+  "peerDependencies": {
+    "firebase": ">=10.0.0"
+  },
+  "peerDependenciesMeta": {
+    "firebase": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "firebase": "^11.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
